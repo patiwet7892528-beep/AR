@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AR Science Match ป.5</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- MediaPipe Hands -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;600;800&display=swap');
+        body {
+            font-family: 'Kanit', sans-serif;
+            margin: 0;
+            overflow: hidden;
+            background-color: #050510;
+            color: white;
+        }
+        #gameCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 10;
+        }
+        .neon-text {
+            text-shadow: 0 0 5px #fff, 0 0 10px #fff, 0 0 20px #0ff, 0 0 40px #0ff;
+        }
+        .ui-layer {
+            position: absolute;
+            z-index: 20;
+            pointer-events: none; /* Let clicks pass through to canvas if needed */
+        }
+        /* Loader */
+        .loader {
+            border: 5px solid #1a1a2e;
+            border-top: 5px solid #00f3ff;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+
+    <!-- Loading Screen -->
+    <div id="loadingScreen" class="absolute inset-0 flex flex-col items-center justify-center bg-[#050510] z-50">
+        <div class="loader mb-4"></div>
+        <h1 class="text-3xl font-bold text-[#00f3ff] neon-text">กำลังโหลด AI จับการเคลื่อนไหว...</h1>
+        <p class="text-gray-400 mt-2">กรุณาอนุญาตให้เว็บเบราว์เซอร์ใช้งานกล้องของคุณ</p>
+    </div>
+
+    <!-- Hidden Video Element for MediaPipe -->
+    <video id="inputVideo" class="hidden" autoplay playsinline></video>
+
+    <!-- Main Game Canvas -->
+    <canvas id="gameCanvas"></canvas>
+
+    <!-- UI Overlay (Header/Footer) -->
+    <div class="ui-layer w-full h-full flex flex-col justify-between p-6">
+        <!-- Header -->
+        <div class="flex justify-between items-start">
+            <div class="border-2 border-[#b52dff] bg-black/50 p-4 rounded-xl shadow-[0_0_15px_rgba(181,45,255,0.5)] backdrop-blur-sm">
+                <h2 class="text-xl font-bold text-[#b52dff]">AR SCIENCE <span class="text-[#00ff88]">MATCH</span></h2>
+                <p class="text-sm">สถานะของสาร ป.5</p>
+            </div>
+            
+            <div class="border-2 border-[#00f3ff] bg-black/50 p-4 rounded-xl shadow-[0_0_15px_rgba(0,243,255,0.5)] backdrop-blur-sm text-center min-w-[120px]">
+                <p class="text-sm text-gray-300">คะแนน</p>
+                <p id="scoreDisplay" class="text-3xl font-bold text-[#00f3ff] neon-text">0 / 5</p>
+            </div>
+        </div>
+
+        <!-- Footer Instructions -->
+        <div class="text-center pb-4">
+            <div class="inline-block border border-gray-600 bg-black/70 px-6 py-3 rounded-full backdrop-blur-sm">
+                <p class="text-lg">🤏 ใช้นิ้วชี้และนิ้วโป้ง <span class="text-[#00ff88] font-bold">จีบเพื่อหยิบ</span> และลากวัตถุไปใส่กล่องที่ถูกต้อง</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const videoElement = document.getElementById('inputVideo');
+        const canvasElement = document.getElementById('gameCanvas');
+        const canvasCtx = canvasElement.getContext('2d');
+        const loadingScreen = document.getElementById('loadingScreen');
+        const scoreDisplay = document.getElementById('scoreDisplay');
+
+        // Game State
+        let score = 0;
+        const maxScore = 5;
+        let isPinching = false;
+        let handCursor = { x: 0, y: 0 };
+        let activeItem = null; // Item currently being dragged
+
+        // Define Targets (Categories)
+        const targets = [
+            { id: 'solid', label: 'ของแข็ง', color: '#ff3366', x: 0, y: 0, w: 250, h: 80 },
+            { id: 'liquid', label: 'ของเหลว', color: '#00ff88', x: 0, y: 0, w: 250, h: 80 },
+            { id: 'gas', label: 'แก๊ส', color: '#00f3ff', x: 0, y: 0, w: 250, h: 80 }
+        ];
+
+        // Define Draggable Items
+        let items = [
+            { id: 1, type: 'solid', emoji: '🧊', name: 'น้ำแข็ง', x: 0, y: 0, size: 60, isMatched: false, originX: 0, originY: 0 },
+            { id: 2, type: 'liquid', emoji: '💧', name: 'น้ำ', x: 0, y: 0, size: 60, isMatched: false, originX: 0, originY: 0 },
+            { id: 3, type: 'gas', emoji: '☁️', name: 'ไอน้ำ', x: 0, y: 0, size: 60, isMatched: false, originX: 0, originY: 0 },
+            { id: 4, type: 'solid', emoji: '🪨', name: 'ก้อนหิน', x: 0, y: 0, size: 60, isMatched: false, originX: 0, originY: 0 },
+            { id: 5, type: 'liquid', emoji: '☕', name: 'กาแฟ', x: 0, y: 0, size: 60, isMatched: false, originX: 0, originY: 0 }
+        ];
+
+        // Particles for effects
+        let particles = [];
+
+        // Resize Canvas to fit screen
+        function resizeCanvas() {
+            canvasElement.width = window.innerWidth;
+            canvasElement.height = window.innerHeight;
+            
+            // Reposition Targets (Right side)
+            const startY = canvasElement.height / 2 - 150;
+            targets.forEach((target, index) => {
+                target.x = canvasElement.width - 350;
+                target.y = startY + (index * 120);
+            });
+
+            // Reposition Items (Left side)
+            const itemStartY = canvasElement.height / 2 - 200;
+            items.forEach((item, index) => {
+                if(!item.isMatched) {
+                    item.x = 150;
+                    item.originX = 150;
+                    item.y = itemStartY + (index * 100);
+                    item.originY = item.y;
+                }
+            });
+        }
+        window.addEventListener('resize', resizeCanvas);
+
+        // Particle System
+        function createParticles(x, y, color) {
+            for (let i = 0; i < 20; i++) {
+                particles.push({
+                    x: x, y: y,
+                    vx: (Math.random() - 0.5) * 10,
+                    vy: (Math.random() - 0.5) * 10,
+                    life: 1.0,
+                    color: color
+                });
+            }
+        }
+
+        function updateAndDrawParticles() {
+            for (let i = particles.length - 1; i >= 0; i--) {
+                let p = particles[i];
+                p.x += p.vx;
+                p.y += p.vy;
+                p.life -= 0.02;
+
+                if (p.life <= 0) {
+                    particles.splice(i, 1);
+                } else {
+                    canvasCtx.globalAlpha = p.life;
+                    canvasCtx.fillStyle = p.color;
+                    canvasCtx.beginPath();
+                    canvasCtx.arc(p.x, p.y, 4, 0, Math.PI * 2);
+                    canvasCtx.fill();
+                    canvasCtx.globalAlpha = 1.0;
+                }
+            }
+        }
+
+        // --- Core Game Render Loop ---
+        function drawGame() {
+            // Clear canvas is not needed if we cover it, but good practice
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+
+            // Draw Video Background (Flipped horizontally so it acts like a mirror)
+            canvasCtx.save();
+            canvasCtx.scale(-1, 1);
+            canvasCtx.translate(-canvasElement.width, 0);
+            // We use object-fit equivalent logic
+            const hRatio = canvasElement.width / videoElement.videoWidth;
+            const vRatio = canvasElement.height / videoElement.videoHeight;
+            const ratio  = Math.max(hRatio, vRatio);
+            const centerShift_x = (canvasElement.width - videoElement.videoWidth*ratio) / 2;
+            const centerShift_y = (canvasElement.height - videoElement.videoHeight*ratio) / 2;  
+            if (videoElement.readyState === 4) {
+                canvasCtx.drawImage(videoElement, 0, 0, videoElement.videoWidth, videoElement.videoHeight,
+                                   centerShift_x, centerShift_y, videoElement.videoWidth*ratio, videoElement.videoHeight*ratio);
+            }
+            canvasCtx.restore();
+
+            // Apply dark tint over video
+            canvasCtx.fillStyle = 'rgba(5, 5, 16, 0.6)';
+            canvasCtx.fillRect(0, 0, canvasElement.width, canvasElement.height);
+
+            // Draw Targets
+            targets.forEach(target => {
+                // Glow effect
+                canvasCtx.shadowBlur = 20;
+                canvasCtx.shadowColor = target.color;
+                canvasCtx.strokeStyle = target.color;
+                canvasCtx.lineWidth = 2;
+                
+                // Box
+                canvasCtx.beginPath();
+                canvasCtx.roundRect(target.x, target.y, target.w, target.h, 15);
+                canvasCtx.stroke();
+                
+                canvasCtx.fillStyle = 'rgba(0,0,0,0.5)';
+                canvasCtx.fill();
+
+                // Text
+                canvasCtx.shadowBlur = 0;
+                canvasCtx.fillStyle = 'white';
+                canvasCtx.font = '24px Kanit';
+                canvasCtx.textAlign = 'center';
+                canvasCtx.textBaseline = 'middle';
+                canvasCtx.fillText(target.label, target.x + target.w/2, target.y + target.h/2);
+            });
+
+            // Draw Items
+            items.forEach(item => {
+                if (item.isMatched) return; // Hide matched items from source list
+
+                canvasCtx.shadowBlur = activeItem === item ? 30 : 15;
+                canvasCtx.shadowColor = activeItem === item ? '#fff' : '#b52dff';
+                
+                // Item background (Hexagon or Circle)
+                canvasCtx.beginPath();
+                canvasCtx.arc(item.x, item.y, item.size/2 + 10, 0, Math.PI * 2);
+                canvasCtx.fillStyle = 'rgba(20, 10, 40, 0.8)';
+                canvasCtx.fill();
+                canvasCtx.strokeStyle = '#b52dff';
+                canvasCtx.lineWidth = 2;
+                canvasCtx.stroke();
+
+                // Emoji
+                canvasCtx.shadowBlur = 0;
+                canvasCtx.font = `${item.size}px Arial`;
+                canvasCtx.textAlign = 'center';
+                canvasCtx.textBaseline = 'middle';
+                canvasCtx.fillText(item.emoji, item.x, item.y + 5);
+            });
+
+            // Draw Particles
+            updateAndDrawParticles();
+
+            // Draw Hand Cursor
+            if (handCursor.x !== 0 && handCursor.y !== 0) {
+                canvasCtx.beginPath();
+                canvasCtx.arc(handCursor.x, handCursor.y, isPinching ? 15 : 25, 0, 2 * Math.PI);
+                canvasCtx.fillStyle = isPinching ? 'rgba(0, 255, 136, 0.8)' : 'rgba(0, 243, 255, 0.4)';
+                canvasCtx.fill();
+                canvasCtx.lineWidth = 3;
+                canvasCtx.strokeStyle = isPinching ? '#fff' : '#00f3ff';
+                canvasCtx.shadowBlur = 20;
+                canvasCtx.shadowColor = isPinching ? '#00ff88' : '#00f3ff';
+                canvasCtx.stroke();
+                
+                // Reset shadow
+                canvasCtx.shadowBlur = 0;
+            }
+        }
+
+        // --- Interaction Logic ---
+        function checkCollisions() {
+            // 1. Check if trying to grab an item
+            if (isPinching && !activeItem) {
+                for (let i = 0; i < items.length; i++) {
+                    let item = items[i];
+                    if (item.isMatched) continue;
+                    
+                    let dist = Math.hypot(handCursor.x - item.x, handCursor.y - item.y);
+                    if (dist < item.size) {
+                        activeItem = item;
+                        break; // Grab only one
+                    }
+                }
+            }
+
+            // 2. Drag active item
+            if (isPinching && activeItem) {
+                // Smooth follow
+                activeItem.x += (handCursor.x - activeItem.x) * 0.5;
+                activeItem.y += (handCursor.y - activeItem.y) * 0.5;
+            }
+
+            // 3. Drop item (Stop pinching)
+            if (!isPinching && activeItem) {
+                // Check if dropped on target
+                let droppedOnTarget = null;
+                for (let i = 0; i < targets.length; i++) {
+                    let t = targets[i];
+                    if (activeItem.x > t.x && activeItem.x < t.x + t.w &&
+                        activeItem.y > t.y && activeItem.y < t.y + t.h) {
+                        droppedOnTarget = t;
+                        break;
+                    }
+                }
+
+                if (droppedOnTarget) {
+                    if (activeItem.type === droppedOnTarget.id) {
+                        // Correct Match!
+                        activeItem.isMatched = true;
+                        score++;
+                        scoreDisplay.innerText = `${score} / ${maxScore}`;
+                        createParticles(activeItem.x, activeItem.y, droppedOnTarget.color);
+                        
+                        // Win condition
+                        if(score === maxScore) {
+                            setTimeout(() => alert('🎉 ยินดีด้วย! คุณคือนักวิทยาศาสตร์คนเก่ง!'), 500);
+                        }
+                    } else {
+                        // Wrong Match - Snap back
+                        activeItem.x = activeItem.originX;
+                        activeItem.y = activeItem.originY;
+                    }
+                } else {
+                    // Dropped nowhere - Snap back
+                    activeItem.x = activeItem.originX;
+                    activeItem.y = activeItem.originY;
+                }
+                
+                activeItem = null;
+            }
+        }
+
+        // --- MediaPipe Hands Setup ---
+        function onResults(results) {
+            // Hide loading screen on first frame
+            if (loadingScreen.style.display !== 'none') {
+                loadingScreen.style.display = 'none';
+                resizeCanvas();
+            }
+
+            // Reset cursor if no hands
+            if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
+                handCursor.x = 0;
+                handCursor.y = 0;
+                if(activeItem && isPinching) {
+                    // Hand lost while dragging, snap back
+                    isPinching = false;
+                    checkCollisions(); 
+                }
+            }
+
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                const landmarks = results.multiHandLandmarks[0]; // Use first hand
+                
+                // Landmark 8 is Index tip, Landmark 4 is Thumb tip
+                const indexTip = landmarks[8];
+                const thumbTip = landmarks[4];
+
+                // Convert normalized coordinates (0-1) to canvas pixels
+                // Note: We subtract X from 1 because the video is horizontally flipped
+                const ix = (1 - indexTip.x) * canvasElement.width;
+                const iy = indexTip.y * canvasElement.height;
+                const tx = (1 - thumbTip.x) * canvasElement.width;
+                const ty = thumbTip.y * canvasElement.height;
+
+                // Calculate midpoint as cursor position
+                handCursor.x = (ix + tx) / 2;
+                handCursor.y = (iy + ty) / 2;
+
+                // Calculate distance between thumb and index to detect "Pinch"
+                const dist = Math.hypot(ix - tx, iy - ty);
+                
+                // Pinch threshold (adjust based on testing)
+                isPinching = dist < 50;
+            }
+
+            checkCollisions();
+            drawGame();
+        }
+
+        const hands = new Hands({locateFile: (file) => {
+            return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+        }});
+
+        hands.setOptions({
+            maxNumHands: 1,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.7,
+            minTrackingConfidence: 0.7
+        });
+        hands.onResults(onResults);
+
+        // Start WebCam
+        const camera = new Camera(videoElement, {
+            onFrame: async () => {
+                await hands.send({image: videoElement});
+            },
+            width: 1280,
+            height: 720
+        });
+        camera.start();
+
+    </script>
+</body>
+</html>
