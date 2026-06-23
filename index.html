@@ -2,7 +2,7 @@
 <html lang="th">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>AR Science Match ป.5</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -20,6 +20,7 @@
             overflow: hidden;
             background-color: #050510;
             color: white;
+            touch-action: none; /* Prevent scrolling when dragging */
         }
         #gameCanvas {
             position: absolute;
@@ -33,27 +34,58 @@
         .ui-layer {
             position: absolute;
             z-index: 20;
-            pointer-events: none; /* Let clicks pass through to canvas if needed */
+            pointer-events: none;
         }
-        /* Loader */
         .loader {
-            border: 5px solid #1a1a2e;
-            border-top: 5px solid #00f3ff;
+            border: 4px solid #1a1a2e;
+            border-top: 4px solid #00f3ff;
             border-radius: 50%;
-            width: 50px;
-            height: 50px;
+            width: 30px;
+            height: 30px;
             animation: spin 1s linear infinite;
         }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        /* Style for interactive buttons */
+        .interactive-btn {
+            pointer-events: auto;
+        }
     </style>
 </head>
 <body>
 
-    <!-- Loading Screen -->
-    <div id="loadingScreen" class="absolute inset-0 flex flex-col items-center justify-center bg-[#050510] z-50">
-        <div class="loader mb-4"></div>
-        <h1 class="text-3xl font-bold text-[#00f3ff] neon-text">กำลังโหลด AI จับการเคลื่อนไหว...</h1>
-        <p class="text-gray-400 mt-2">กรุณาอนุญาตให้เว็บเบราว์เซอร์ใช้งานกล้องของคุณ</p>
+    <!-- Start Screen (Mode Selection) -->
+    <div id="loadingScreen" class="absolute inset-0 flex flex-col items-center justify-center bg-[#050510] z-50 p-4">
+        <div id="startButtonPanel" class="text-center p-8 bg-black/80 rounded-3xl border-2 border-[#b52dff] shadow-[0_0_40px_rgba(181,45,255,0.4)] max-w-xl mx-auto w-full">
+            <h1 class="text-4xl font-bold text-[#b52dff] neon-text mb-2">SCIENCE <span class="text-[#00ff88]">MATCH</span></h1>
+            <p class="text-lg text-gray-300 mb-8">เรียนรู้สถานะของสาร ป.5</p>
+            
+            <div class="flex flex-col gap-4">
+                <!-- AR Camera Button -->
+                <button id="startCameraBtn" class="w-full px-6 py-4 bg-[#00f3ff] text-black font-bold rounded-2xl shadow-[0_0_20px_rgba(0,243,255,0.5)] hover:bg-white hover:scale-105 transition-all text-xl flex items-center justify-center interactive-btn">
+                    <span>📸 เล่นโหมด AR (ใช้กล้อง)</span>
+                </button>
+                
+                <!-- Mouse/Touch Button -->
+                <button id="startMouseBtn" class="w-full px-6 py-4 bg-transparent border-2 border-[#00ff88] text-[#00ff88] font-bold rounded-2xl shadow-[0_0_20px_rgba(0,255,136,0.2)] hover:bg-[#00ff88]/20 hover:scale-105 transition-all text-xl flex items-center justify-center interactive-btn">
+                    <span>👆 เล่นโหมดปกติ (แตะลาก/เมาส์)</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Error Panel -->
+        <div id="errorPanel" class="hidden text-center p-8 bg-black/80 rounded-2xl border-2 border-[#ff3366] shadow-[0_0_30px_rgba(255,51,102,0.5)] max-w-xl mx-auto w-full">
+            <h1 class="text-2xl font-bold text-[#ff3366] neon-text mb-4">❌ ไม่สามารถเปิดกล้องได้</h1>
+            <p id="errorReason" class="text-lg text-white mb-4"></p>
+            <p id="errorDetail" class="text-xs text-yellow-400 mb-6 bg-black/50 p-2 rounded break-words"></p>
+            <div class="flex flex-col gap-3">
+                <button onclick="location.reload()" class="w-full px-6 py-3 bg-[#ff3366] text-white font-bold rounded-xl shadow-[0_0_15px_rgba(255,51,102,0.8)] hover:bg-white hover:text-[#ff3366] transition-all text-lg interactive-btn">
+                    🔄 ลองอนุญาตใหม่อีกครั้ง
+                </button>
+                <button id="fallbackMouseBtn" class="w-full px-6 py-3 bg-gray-700 text-white font-bold rounded-xl hover:bg-gray-600 transition-all text-lg interactive-btn">
+                    👆 เปลี่ยนไปเล่นโหมดปกติ (ไม่ใช้กล้อง)
+                </button>
+            </div>
+        </div>
     </div>
 
     <!-- Hidden Video Element for MediaPipe -->
@@ -63,24 +95,24 @@
     <canvas id="gameCanvas"></canvas>
 
     <!-- UI Overlay (Header/Footer) -->
-    <div class="ui-layer w-full h-full flex flex-col justify-between p-6">
+    <div class="ui-layer w-full h-full flex flex-col justify-between p-4 sm:p-6">
         <!-- Header -->
         <div class="flex justify-between items-start">
-            <div class="border-2 border-[#b52dff] bg-black/50 p-4 rounded-xl shadow-[0_0_15px_rgba(181,45,255,0.5)] backdrop-blur-sm">
-                <h2 class="text-xl font-bold text-[#b52dff]">AR SCIENCE <span class="text-[#00ff88]">MATCH</span></h2>
-                <p class="text-sm">สถานะของสาร ป.5</p>
+            <div class="border-2 border-[#b52dff] bg-black/60 p-3 sm:p-4 rounded-xl shadow-[0_0_15px_rgba(181,45,255,0.5)] backdrop-blur-md">
+                <h2 class="text-lg sm:text-xl font-bold text-[#b52dff]">AR SCIENCE <span class="text-[#00ff88]">MATCH</span></h2>
+                <p class="text-xs sm:text-sm text-gray-200">สถานะของสาร ป.5</p>
             </div>
             
-            <div class="border-2 border-[#00f3ff] bg-black/50 p-4 rounded-xl shadow-[0_0_15px_rgba(0,243,255,0.5)] backdrop-blur-sm text-center min-w-[120px]">
-                <p class="text-sm text-gray-300">คะแนน</p>
-                <p id="scoreDisplay" class="text-3xl font-bold text-[#00f3ff] neon-text">0 / 5</p>
+            <div class="border-2 border-[#00f3ff] bg-black/60 p-2 sm:p-4 rounded-xl shadow-[0_0_15px_rgba(0,243,255,0.5)] backdrop-blur-md text-center min-w-[90px] sm:min-w-[120px]">
+                <p class="text-xs sm:text-sm text-gray-300">คะแนน</p>
+                <p id="scoreDisplay" class="text-2xl sm:text-3xl font-bold text-[#00f3ff] neon-text">0 / 5</p>
             </div>
         </div>
 
         <!-- Footer Instructions -->
-        <div class="text-center pb-4">
-            <div class="inline-block border border-gray-600 bg-black/70 px-6 py-3 rounded-full backdrop-blur-sm">
-                <p class="text-lg">🤏 ใช้นิ้วชี้และนิ้วโป้ง <span class="text-[#00ff88] font-bold">จีบเพื่อหยิบ</span> และลากวัตถุไปใส่กล่องที่ถูกต้อง</p>
+        <div class="text-center pb-2">
+            <div id="instructionBox" class="inline-block border border-gray-500 bg-black/80 px-4 py-2 sm:px-6 sm:py-3 rounded-full backdrop-blur-md">
+                <p class="text-sm sm:text-lg">🤏 จีบนิ้ว หรือ 👆 แตะลาก วัตถุไปใส่กล่อง</p>
             </div>
         </div>
     </div>
@@ -91,67 +123,96 @@
         const canvasCtx = canvasElement.getContext('2d');
         const loadingScreen = document.getElementById('loadingScreen');
         const scoreDisplay = document.getElementById('scoreDisplay');
+        const startButtonPanel = document.getElementById('startButtonPanel');
+        const startCameraBtn = document.getElementById('startCameraBtn');
+        const startMouseBtn = document.getElementById('startMouseBtn');
+        const fallbackMouseBtn = document.getElementById('fallbackMouseBtn');
+        const errorPanel = document.getElementById('errorPanel');
+        const instructionBox = document.getElementById('instructionBox');
 
-        // Game State
+        // Input State Management
+        let inputMode = 'mouse'; // 'mouse' or 'hand'
+        let cameraStreamActive = false;
+        
+        // Unified Cursor
+        let cursor = { x: 0, y: 0 };
+        let isGrabbing = false;
+        
+        // Mouse/Touch specific
+        let mouseX = window.innerWidth / 2;
+        let mouseY = window.innerHeight / 2;
+        let isMouseDown = false;
+
+        // Hand specific
+        let handX = window.innerWidth / 2;
+        let handY = window.innerHeight / 2;
+        let isHandPinching = false;
+
+        // Game Logic State
         let score = 0;
         const maxScore = 5;
-        let isPinching = false;
-        let handCursor = { x: 0, y: 0 };
         let activeItem = null; // Item currently being dragged
 
-        // Define Targets (Categories)
-        const targets = [
-            { id: 'solid', label: 'ของแข็ง', color: '#ff3366', x: 0, y: 0, w: 250, h: 80 },
-            { id: 'liquid', label: 'ของเหลว', color: '#00ff88', x: 0, y: 0, w: 250, h: 80 },
-            { id: 'gas', label: 'แก๊ส', color: '#00f3ff', x: 0, y: 0, w: 250, h: 80 }
+        // Responsive Targets
+        let targets = [
+            { id: 'solid', label: 'ของแข็ง', color: '#ff3366', x: 0, y: 0, w: 200, h: 70 },
+            { id: 'liquid', label: 'ของเหลว', color: '#00ff88', x: 0, y: 0, w: 200, h: 70 },
+            { id: 'gas', label: 'แก๊ส', color: '#00f3ff', x: 0, y: 0, w: 200, h: 70 }
         ];
 
-        // Define Draggable Items
         let items = [
-            { id: 1, type: 'solid', emoji: '🧊', name: 'น้ำแข็ง', x: 0, y: 0, size: 60, isMatched: false, originX: 0, originY: 0 },
-            { id: 2, type: 'liquid', emoji: '💧', name: 'น้ำ', x: 0, y: 0, size: 60, isMatched: false, originX: 0, originY: 0 },
-            { id: 3, type: 'gas', emoji: '☁️', name: 'ไอน้ำ', x: 0, y: 0, size: 60, isMatched: false, originX: 0, originY: 0 },
-            { id: 4, type: 'solid', emoji: '🪨', name: 'ก้อนหิน', x: 0, y: 0, size: 60, isMatched: false, originX: 0, originY: 0 },
-            { id: 5, type: 'liquid', emoji: '☕', name: 'กาแฟ', x: 0, y: 0, size: 60, isMatched: false, originX: 0, originY: 0 }
+            { id: 1, type: 'solid', emoji: '🧊', name: 'น้ำแข็ง', x: 0, y: 0, size: 50, isMatched: false, originX: 0, originY: 0 },
+            { id: 2, type: 'liquid', emoji: '💧', name: 'น้ำ', x: 0, y: 0, size: 50, isMatched: false, originX: 0, originY: 0 },
+            { id: 3, type: 'gas', emoji: '☁️', name: 'ไอน้ำ', x: 0, y: 0, size: 50, isMatched: false, originX: 0, originY: 0 },
+            { id: 4, type: 'solid', emoji: '🪨', name: 'ก้อนหิน', x: 0, y: 0, size: 50, isMatched: false, originX: 0, originY: 0 },
+            { id: 5, type: 'liquid', emoji: '☕', name: 'กาแฟ', x: 0, y: 0, size: 50, isMatched: false, originX: 0, originY: 0 }
         ];
 
-        // Particles for effects
         let particles = [];
 
-        // Resize Canvas to fit screen
+        // --- Layout Calculation ---
         function resizeCanvas() {
             canvasElement.width = window.innerWidth;
             canvasElement.height = window.innerHeight;
             
-            // Reposition Targets (Right side)
-            const startY = canvasElement.height / 2 - 150;
+            const isMobile = window.innerWidth < 768;
+            
+            // Adjust sizes based on screen
+            const tWidth = isMobile ? 140 : 250;
+            const tHeight = isMobile ? 60 : 80;
+            const iSize = isMobile ? 40 : 60;
+            
+            // Layout Targets (Right side)
+            const startY = canvasElement.height / 2 - (isMobile ? 100 : 150);
             targets.forEach((target, index) => {
-                target.x = canvasElement.width - 350;
-                target.y = startY + (index * 120);
+                target.w = tWidth; target.h = tHeight;
+                target.x = canvasElement.width - tWidth - (isMobile ? 20 : 50);
+                target.y = startY + (index * (tHeight + 30));
             });
 
-            // Reposition Items (Left side)
-            const itemStartY = canvasElement.height / 2 - 200;
+            // Layout Items (Left side)
+            const itemStartY = canvasElement.height / 2 - (isMobile ? 150 : 200);
             items.forEach((item, index) => {
+                item.size = iSize;
                 if(!item.isMatched) {
-                    item.x = 150;
-                    item.originX = 150;
-                    item.y = itemStartY + (index * 100);
+                    item.x = isMobile ? 60 : 150;
+                    item.originX = item.x;
+                    item.y = itemStartY + (index * (iSize + 30));
                     item.originY = item.y;
                 }
             });
         }
         window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
 
-        // Particle System
+        // --- Particle Effects ---
         function createParticles(x, y, color) {
-            for (let i = 0; i < 20; i++) {
+            for (let i = 0; i < 25; i++) {
                 particles.push({
                     x: x, y: y,
-                    vx: (Math.random() - 0.5) * 10,
-                    vy: (Math.random() - 0.5) * 10,
-                    life: 1.0,
-                    color: color
+                    vx: (Math.random() - 0.5) * 12,
+                    vy: (Math.random() - 0.5) * 12,
+                    life: 1.0, color: color
                 });
             }
         }
@@ -159,10 +220,8 @@
         function updateAndDrawParticles() {
             for (let i = particles.length - 1; i >= 0; i--) {
                 let p = particles[i];
-                p.x += p.vx;
-                p.y += p.vy;
+                p.x += p.vx; p.y += p.vy;
                 p.life -= 0.02;
-
                 if (p.life <= 0) {
                     particles.splice(i, 1);
                 } else {
@@ -176,126 +235,146 @@
             }
         }
 
-        // --- Core Game Render Loop ---
+        // --- Game Rendering ---
         function drawGame() {
-            // Clear canvas is not needed if we cover it, but good practice
             canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
 
-            // Draw Video Background (Flipped horizontally so it acts like a mirror)
-            canvasCtx.save();
-            canvasCtx.scale(-1, 1);
-            canvasCtx.translate(-canvasElement.width, 0);
-            // We use object-fit equivalent logic
-            const hRatio = canvasElement.width / videoElement.videoWidth;
-            const vRatio = canvasElement.height / videoElement.videoHeight;
-            const ratio  = Math.max(hRatio, vRatio);
-            const centerShift_x = (canvasElement.width - videoElement.videoWidth*ratio) / 2;
-            const centerShift_y = (canvasElement.height - videoElement.videoHeight*ratio) / 2;  
-            if (videoElement.readyState === 4) {
+            // 1. Draw Background (Video OR Gradient)
+            if (cameraStreamActive && videoElement.readyState === 4 && videoElement.videoWidth > 0) {
+                // AR Mode: Draw Video
+                canvasCtx.save();
+                canvasCtx.scale(-1, 1);
+                canvasCtx.translate(-canvasElement.width, 0);
+                const hRatio = canvasElement.width / videoElement.videoWidth;
+                const vRatio = canvasElement.height / videoElement.videoHeight;
+                const ratio  = Math.max(hRatio, vRatio);
+                const centerShift_x = (canvasElement.width - videoElement.videoWidth*ratio) / 2;
+                const centerShift_y = (canvasElement.height - videoElement.videoHeight*ratio) / 2;  
                 canvasCtx.drawImage(videoElement, 0, 0, videoElement.videoWidth, videoElement.videoHeight,
                                    centerShift_x, centerShift_y, videoElement.videoWidth*ratio, videoElement.videoHeight*ratio);
+                canvasCtx.restore();
+                
+                // Dark tint
+                canvasCtx.fillStyle = 'rgba(5, 5, 16, 0.5)';
+                canvasCtx.fillRect(0, 0, canvasElement.width, canvasElement.height);
+            } else {
+                // Normal Mode: Space Gradient Background
+                const grad = canvasCtx.createLinearGradient(0, 0, canvasElement.width, canvasElement.height);
+                grad.addColorStop(0, '#050510');
+                grad.addColorStop(0.5, '#1a103c');
+                grad.addColorStop(1, '#050510');
+                canvasCtx.fillStyle = grad;
+                canvasCtx.fillRect(0, 0, canvasElement.width, canvasElement.height);
+                
+                // Draw some static stars
+                canvasCtx.fillStyle = 'white';
+                for(let i=0; i<50; i++) {
+                    canvasCtx.globalAlpha = Math.random() * 0.5;
+                    canvasCtx.beginPath();
+                    canvasCtx.arc(Math.random() * canvasElement.width, Math.random() * canvasElement.height, Math.random() * 2, 0, Math.PI*2);
+                    canvasCtx.fill();
+                }
+                canvasCtx.globalAlpha = 1.0;
             }
-            canvasCtx.restore();
 
-            // Apply dark tint over video
-            canvasCtx.fillStyle = 'rgba(5, 5, 16, 0.6)';
-            canvasCtx.fillRect(0, 0, canvasElement.width, canvasElement.height);
-
-            // Draw Targets
+            // 2. Draw Targets
             targets.forEach(target => {
-                // Glow effect
-                canvasCtx.shadowBlur = 20;
+                canvasCtx.shadowBlur = 15;
                 canvasCtx.shadowColor = target.color;
                 canvasCtx.strokeStyle = target.color;
                 canvasCtx.lineWidth = 2;
                 
-                // Box
                 canvasCtx.beginPath();
                 canvasCtx.roundRect(target.x, target.y, target.w, target.h, 15);
                 canvasCtx.stroke();
                 
-                canvasCtx.fillStyle = 'rgba(0,0,0,0.5)';
+                canvasCtx.fillStyle = 'rgba(0,0,0,0.6)';
                 canvasCtx.fill();
 
-                // Text
                 canvasCtx.shadowBlur = 0;
                 canvasCtx.fillStyle = 'white';
-                canvasCtx.font = '24px Kanit';
+                canvasCtx.font = window.innerWidth < 768 ? '18px Kanit' : '24px Kanit';
                 canvasCtx.textAlign = 'center';
                 canvasCtx.textBaseline = 'middle';
                 canvasCtx.fillText(target.label, target.x + target.w/2, target.y + target.h/2);
             });
 
-            // Draw Items
+            // 3. Draw Items
             items.forEach(item => {
-                if (item.isMatched) return; // Hide matched items from source list
+                if (item.isMatched) return;
 
-                canvasCtx.shadowBlur = activeItem === item ? 30 : 15;
+                canvasCtx.shadowBlur = activeItem === item ? 25 : 10;
                 canvasCtx.shadowColor = activeItem === item ? '#fff' : '#b52dff';
                 
-                // Item background (Hexagon or Circle)
                 canvasCtx.beginPath();
-                canvasCtx.arc(item.x, item.y, item.size/2 + 10, 0, Math.PI * 2);
-                canvasCtx.fillStyle = 'rgba(20, 10, 40, 0.8)';
+                canvasCtx.arc(item.x, item.y, item.size/2 + 8, 0, Math.PI * 2);
+                canvasCtx.fillStyle = 'rgba(20, 10, 40, 0.9)';
                 canvasCtx.fill();
-                canvasCtx.strokeStyle = '#b52dff';
+                canvasCtx.strokeStyle = activeItem === item ? '#00ff88' : '#b52dff';
                 canvasCtx.lineWidth = 2;
                 canvasCtx.stroke();
 
-                // Emoji
                 canvasCtx.shadowBlur = 0;
-                canvasCtx.font = `${item.size}px Arial`;
+                canvasCtx.font = `${item.size * 0.8}px Arial`;
                 canvasCtx.textAlign = 'center';
                 canvasCtx.textBaseline = 'middle';
                 canvasCtx.fillText(item.emoji, item.x, item.y + 5);
             });
 
-            // Draw Particles
+            // 4. Draw Particles
             updateAndDrawParticles();
 
-            // Draw Hand Cursor
-            if (handCursor.x !== 0 && handCursor.y !== 0) {
+            // 5. Draw Cursor (Hand or Mouse)
+            if (cursor.x !== 0 && cursor.y !== 0) {
                 canvasCtx.beginPath();
-                canvasCtx.arc(handCursor.x, handCursor.y, isPinching ? 15 : 25, 0, 2 * Math.PI);
-                canvasCtx.fillStyle = isPinching ? 'rgba(0, 255, 136, 0.8)' : 'rgba(0, 243, 255, 0.4)';
+                canvasCtx.arc(cursor.x, cursor.y, isGrabbing ? 12 : 20, 0, 2 * Math.PI);
+                canvasCtx.fillStyle = isGrabbing ? 'rgba(0, 255, 136, 0.7)' : 'rgba(0, 243, 255, 0.3)';
                 canvasCtx.fill();
                 canvasCtx.lineWidth = 3;
-                canvasCtx.strokeStyle = isPinching ? '#fff' : '#00f3ff';
-                canvasCtx.shadowBlur = 20;
-                canvasCtx.shadowColor = isPinching ? '#00ff88' : '#00f3ff';
+                canvasCtx.strokeStyle = isGrabbing ? '#fff' : '#00f3ff';
+                canvasCtx.shadowBlur = 15;
+                canvasCtx.shadowColor = isGrabbing ? '#00ff88' : '#00f3ff';
                 canvasCtx.stroke();
-                
-                // Reset shadow
                 canvasCtx.shadowBlur = 0;
             }
         }
 
-        // --- Interaction Logic ---
-        function checkCollisions() {
-            // 1. Check if trying to grab an item
-            if (isPinching && !activeItem) {
+        // --- Core Logic & Physics Loop ---
+        function checkCollisionsAndPhysics() {
+            // Update unified cursor based on mode
+            if (inputMode === 'mouse') {
+                cursor.x = mouseX;
+                cursor.y = mouseY;
+                isGrabbing = isMouseDown;
+            } else if (inputMode === 'hand') {
+                cursor.x = handX;
+                cursor.y = handY;
+                isGrabbing = isHandPinching;
+            }
+
+            // Grab logic
+            if (isGrabbing && !activeItem) {
                 for (let i = 0; i < items.length; i++) {
                     let item = items[i];
                     if (item.isMatched) continue;
-                    
-                    let dist = Math.hypot(handCursor.x - item.x, handCursor.y - item.y);
+                    let dist = Math.hypot(cursor.x - item.x, cursor.y - item.y);
                     if (dist < item.size) {
                         activeItem = item;
-                        break; // Grab only one
+                        break;
                     }
                 }
             }
 
-            // 2. Drag active item
-            if (isPinching && activeItem) {
-                // Smooth follow
-                activeItem.x += (handCursor.x - activeItem.x) * 0.5;
-                activeItem.y += (handCursor.y - activeItem.y) * 0.5;
+            // Drag logic
+            if (isGrabbing && activeItem) {
+                // Smooth follow (snappier for mouse)
+                let speed = inputMode === 'mouse' ? 0.6 : 0.4;
+                activeItem.x += (cursor.x - activeItem.x) * speed;
+                activeItem.y += (cursor.y - activeItem.y) * speed;
             }
 
-            // 3. Drop item (Stop pinching)
-            if (!isPinching && activeItem) {
-                // Check if dropped on target
+            // Drop logic
+            if (!isGrabbing && activeItem) {
                 let droppedOnTarget = null;
                 for (let i = 0; i < targets.length; i++) {
                     let t = targets[i];
@@ -308,100 +387,159 @@
 
                 if (droppedOnTarget) {
                     if (activeItem.type === droppedOnTarget.id) {
-                        // Correct Match!
+                        // Match Success!
                         activeItem.isMatched = true;
                         score++;
                         scoreDisplay.innerText = `${score} / ${maxScore}`;
                         createParticles(activeItem.x, activeItem.y, droppedOnTarget.color);
                         
-                        // Win condition
                         if(score === maxScore) {
-                            setTimeout(() => alert('🎉 ยินดีด้วย! คุณคือนักวิทยาศาสตร์คนเก่ง!'), 500);
+                            setTimeout(() => alert('🎉 ยินดีด้วย! คุณเก่งมาก!\nกด F5 หรือรีเฟรชเพื่อเล่นอีกครั้ง'), 500);
                         }
                     } else {
-                        // Wrong Match - Snap back
+                        // Wrong Match -> Snap back
                         activeItem.x = activeItem.originX;
                         activeItem.y = activeItem.originY;
                     }
                 } else {
-                    // Dropped nowhere - Snap back
+                    // Missed target -> Snap back
                     activeItem.x = activeItem.originX;
                     activeItem.y = activeItem.originY;
                 }
-                
                 activeItem = null;
             }
         }
 
-        // --- MediaPipe Hands Setup ---
+        // Main Game Loop
+        function gameLoop() {
+            checkCollisionsAndPhysics();
+            drawGame();
+            requestAnimationFrame(gameLoop);
+        }
+
+        // --- Input Event Listeners (Mouse & Touch) ---
+        function updateMousePos(e) {
+            inputMode = 'mouse';
+            let clientX = e.clientX;
+            let clientY = e.clientY;
+            if (e.touches && e.touches.length > 0) {
+                clientX = e.touches[0].clientX;
+                clientY = e.touches[0].clientY;
+            }
+            if (clientX !== undefined) mouseX = clientX;
+            if (clientY !== undefined) mouseY = clientY;
+        }
+
+        // Desktop Mouse
+        canvasElement.addEventListener('mousedown', (e) => { updateMousePos(e); isMouseDown = true; });
+        canvasElement.addEventListener('mousemove', (e) => { if(inputMode === 'mouse') updateMousePos(e); });
+        window.addEventListener('mouseup', () => { isMouseDown = false; });
+
+        // Mobile Touch
+        canvasElement.addEventListener('touchstart', (e) => { e.preventDefault(); updateMousePos(e); isMouseDown = true; }, {passive: false});
+        canvasElement.addEventListener('touchmove', (e) => { e.preventDefault(); if(inputMode === 'mouse') updateMousePos(e); }, {passive: false});
+        window.addEventListener('touchend', () => { isMouseDown = false; });
+
+        // --- MediaPipe Hand Tracking (AR) ---
         function onResults(results) {
-            // Hide loading screen on first frame
+            // Hide loading if visible
             if (loadingScreen.style.display !== 'none') {
                 loadingScreen.style.display = 'none';
-                resizeCanvas();
-            }
-
-            // Reset cursor if no hands
-            if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
-                handCursor.x = 0;
-                handCursor.y = 0;
-                if(activeItem && isPinching) {
-                    // Hand lost while dragging, snap back
-                    isPinching = false;
-                    checkCollisions(); 
-                }
+                instructionBox.innerHTML = '<p class="text-sm sm:text-lg">🤏 ใช้นิ้วชี้และนิ้วโป้ง <span class="text-[#00ff88] font-bold">จีบเพื่อหยิบ</span></p>';
+                gameLoop(); // Start loop once camera is ready
             }
 
             if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-                const landmarks = results.multiHandLandmarks[0]; // Use first hand
-                
-                // Landmark 8 is Index tip, Landmark 4 is Thumb tip
+                inputMode = 'hand'; // Switch to hand mode
+                const landmarks = results.multiHandLandmarks[0];
                 const indexTip = landmarks[8];
                 const thumbTip = landmarks[4];
 
-                // Convert normalized coordinates (0-1) to canvas pixels
-                // Note: We subtract X from 1 because the video is horizontally flipped
-                const ix = (1 - indexTip.x) * canvasElement.width;
-                const iy = indexTip.y * canvasElement.height;
-                const tx = (1 - thumbTip.x) * canvasElement.width;
-                const ty = thumbTip.y * canvasElement.height;
+                // Coordinate Mapping Logic (Fix for grab offset)
+                let mappedIx, mappedIy, mappedTx, mappedTy;
 
-                // Calculate midpoint as cursor position
-                handCursor.x = (ix + tx) / 2;
-                handCursor.y = (iy + ty) / 2;
+                if (videoElement.videoWidth > 0) {
+                    const hRatio = canvasElement.width / videoElement.videoWidth;
+                    const vRatio = canvasElement.height / videoElement.videoHeight;
+                    const ratio  = Math.max(hRatio, vRatio);
+                    const centerShift_x = (canvasElement.width - videoElement.videoWidth*ratio) / 2;
+                    const centerShift_y = (canvasElement.height - videoElement.videoHeight*ratio) / 2;
 
-                // Calculate distance between thumb and index to detect "Pinch"
-                const dist = Math.hypot(ix - tx, iy - ty);
+                    mappedIx = centerShift_x + (1 - indexTip.x) * (videoElement.videoWidth * ratio);
+                    mappedIy = centerShift_y + indexTip.y * (videoElement.videoHeight * ratio);
+                    mappedTx = centerShift_x + (1 - thumbTip.x) * (videoElement.videoWidth * ratio);
+                    mappedTy = centerShift_y + thumbTip.y * (videoElement.videoHeight * ratio);
+                } else {
+                    mappedIx = (1 - indexTip.x) * canvasElement.width;
+                    mappedIy = indexTip.y * canvasElement.height;
+                    mappedTx = (1 - thumbTip.x) * canvasElement.width;
+                    mappedTy = thumbTip.y * canvasElement.height;
+                }
+
+                handX = (mappedIx + mappedTx) / 2;
+                handY = (mappedIy + mappedTy) / 2;
                 
-                // Pinch threshold (adjust based on testing)
-                isPinching = dist < 50;
-            }
+                // Pinch detection (adaptive threshold)
+                const dist = Math.hypot(mappedIx - mappedTx, mappedIy - mappedTy);
+                isHandPinching = dist < (window.innerWidth < 768 ? 40 : 60); 
 
-            checkCollisions();
-            drawGame();
+            } else {
+                isHandPinching = false;
+                if(inputMode === 'hand' && !activeItem) {
+                    // Hide hand cursor if hand is lost and not dragging
+                    handX = 0; handY = 0;
+                }
+            }
         }
 
         const hands = new Hands({locateFile: (file) => {
             return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
         }});
-
-        hands.setOptions({
-            maxNumHands: 1,
-            modelComplexity: 1,
-            minDetectionConfidence: 0.7,
-            minTrackingConfidence: 0.7
-        });
+        hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.7, minTrackingConfidence: 0.7 });
         hands.onResults(onResults);
 
-        // Start WebCam
-        const camera = new Camera(videoElement, {
-            onFrame: async () => {
-                await hands.send({image: videoElement});
-            },
-            width: 1280,
-            height: 720
+        // --- Start Buttons Logic ---
+        
+        // 1. Start AR Mode
+        startCameraBtn.addEventListener('click', async () => {
+            startCameraBtn.disabled = true;
+            startMouseBtn.classList.add('hidden');
+            startCameraBtn.innerHTML = '<div class="loader scale-50 mr-2"></div> กำลังเปิดกล้อง AI...';
+
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                stream.getTracks().forEach(track => track.stop()); // Stop immediately, let Camera util take over
+
+                cameraStreamActive = true;
+                const camera = new Camera(videoElement, {
+                    onFrame: async () => { await hands.send({image: videoElement}); },
+                    width: 1280, height: 720
+                });
+                await camera.start();
+            } catch (err) {
+                console.error("Camera Error:", err);
+                startButtonPanel.classList.add('hidden');
+                errorPanel.classList.remove('hidden');
+                
+                let thaiReason = "ระบบไม่ได้รับอนุญาตให้ใช้งานกล้องเว็บแคม";
+                if (err.name === 'NotAllowedError') thaiReason = "คุณปฏิเสธการใช้กล้อง หรือเบราว์เซอร์บล็อกไว้";
+                else if (err.name === 'NotFoundError') thaiReason = "คอมพิวเตอร์เครื่องนี้ไม่มีกล้องเว็บแคม";
+                
+                errorReason.innerText = thaiReason;
+                errorDetail.innerText = err.message || err.name;
+            }
         });
-        camera.start();
+
+        // 2. Start Normal Mode (Mouse/Touch) - No Camera needed
+        const startNormalMode = () => {
+            cameraStreamActive = false;
+            loadingScreen.style.display = 'none';
+            instructionBox.innerHTML = '<p class="text-sm sm:text-lg">👆 <span class="text-[#00ff88] font-bold">แตะและลาก</span> วัตถุไปใส่กล่อง</p>';
+            gameLoop(); // Start engine directly
+        };
+
+        startMouseBtn.addEventListener('click', startNormalMode);
+        fallbackMouseBtn.addEventListener('click', startNormalMode);
 
     </script>
 </body>
